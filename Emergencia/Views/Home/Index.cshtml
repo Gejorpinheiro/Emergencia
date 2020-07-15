@@ -1,0 +1,275 @@
+﻿@{
+    ViewBag.Title = "Unidades";
+}
+
+@section styles{
+<style>
+        body {
+            background-color: #f5f5f5;
+        }
+
+        .panel {
+            box-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+        }
+
+        .panelPlaces {
+            margin-top: 15px;
+            display: none;
+        }
+
+        #listPlaces {
+            height: 280px;
+            overflow-y: scroll;
+            padding: 0;
+        }
+
+        #listPlaces li {
+            padding: 9px 10px;
+            border-bottom: 1px solid #ccc;
+        }
+
+        #listPlaces li:last-child {
+            border-bottom: none;
+        }
+
+        #listPlaces li button {
+            float: right;
+            padding: 0px 5px;
+        }
+
+        #listPlaces li span {
+            float: right;
+            margin-right: 15px;
+        }
+
+        #listPlaces li p {
+            width: 60%;
+            margin: 0;
+            display: inline-block;
+        }
+
+        @@media screen and (max-width: 768px) {
+            #listPlaces li p {
+                width: 50%;
+            }
+        }
+</style>    
+}
+
+<h1>Buscar unidades próximas</h1>
+
+<div class="row">
+    <div class="panel clearfix">
+        <div class="col-md-8">
+            <div id="map" style="height: 400px;"></div>
+        </div>
+        <div class="col-md-4">
+            <h4>Buscar</h4>
+            <div class="input-group">
+                <input id="inputSearch" type="text" class="form-control" placeholder="Endereço...">
+                <span class="input-group-btn">
+                    <button class="btn btn-default" type="button"><span class="glyphicon glyphicon-search"></span></button>
+                </span>
+            </div>
+            <div class="panelPlaces panel">
+                <ul id="listPlaces" class="list-group"></ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section scripts{
+    <script>
+        var map, infowindow, autocomplete, origem, directionsService, directionsDisplay;
+        var markers = [];
+        var places = [];
+
+        function initMap() {
+            directionsService = new google.maps.DirectionsService;
+            directionsDisplay = new google.maps.DirectionsRenderer;
+
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: { lat: -14.2, lng: -51.9 },
+                zoom: 15,
+                mapTypeControl: false,
+                panControl: false,
+                zoomControl: false,
+                streetViewControl: false
+            });
+
+            directionsDisplay.setMap(map);
+
+            infowindow = new google.maps.InfoWindow;
+
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(function (position) {
+                    var pos = {
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude
+                    };
+
+                    map.setCenter(pos);
+                }, function () {
+                    map.panTo({ lat: -30.034770, lng: -51.217091 });
+                });
+            } else {
+                map.panTo({ lat: -30.034770, lng: -51.217091 });
+            }
+
+            autocomplete = new google.maps.places.Autocomplete((
+                document.getElementById('inputSearch')), {
+                    componentRestrictions: { 'country': 'br' }
+                }
+            );
+
+            autocomplete.addListener('place_changed', onPlaceChanged);
+
+            $('#listPlaces').on('click', '.verRota', function () {
+                var latlng = $(this).data('latlng');
+
+                latlng = latlng.split('|');
+
+                var destino = new google.maps.LatLng(latlng[0], latlng[1]);
+
+                calculateAndDisplayRoute(origem, destino, directionsService, directionsDisplay);
+            });
+        }
+
+        function onPlaceChanged() {
+            directionsDisplay.setDirections({ routes: [] });
+
+            var place = autocomplete.getPlace();
+
+            if (place.geometry) {
+                if (markers.length > 0) {
+                    var remove = markers.pop();
+                    remove.setMap(null);
+                }
+
+                marker = new google.maps.Marker({
+                    position: place.geometry.location,
+                    map: map,
+                    icon: "../Content/Imgs/pin.png"
+                });
+
+                markers.push(marker);
+                map.panTo(place.geometry.location);
+                origem = place.geometry.location;
+
+                getUnidades();
+            }
+        }
+
+        function getUnidades() {
+            var data = {
+                resource_id: 'ecf0e670-2968-4a01-b256-69f64e3e9ca2', // the resource id
+            };
+
+            $.ajax({
+                url: 'http://datapoa.com.br/api/action/datastore_search',
+                data: data,
+                contentType: "text/plain; charset=utf-8",
+                dataType: 'jsonp',
+                success: function (data) {
+                    if (data.result.total > 0) {
+                        var service = new google.maps.DistanceMatrixService();
+
+                        if (places.length > 0)
+                            places = [];
+
+                        data.result.records.map(function (e) {
+                            var destino = new google.maps.LatLng(e.Latitude, e.Longitude);
+                            var local = {};
+
+                            local.Nome = e.Nome;
+                            local.LatLng = destino;
+                            local.Distance;
+                            local.Telefone = e.Telefone;
+                            local.Endereco = e.Endereзo;
+
+                            service.getDistanceMatrix(
+                                {
+                                    origins: [origem],
+                                    destinations: [destino],
+                                    travelMode: 'DRIVING',
+                                }, function (response, status) {
+                                    if (status == "OK") {
+                                        local.Distance = response.rows[0].elements[0].distance;
+                                    }
+                                }
+                            );
+
+                            places.push(local);
+                        });
+
+                        setTimeout(addPlaces, 700);
+                    }
+                    else {
+                        var listItem = "";
+
+                        listItem = "<li>Nenhuma unidade encontrada.</li>";
+
+                        $('#listPlaces').append(listItem);
+
+                        $('.panelPlaces').fadeIn();
+                    }
+                },
+                error: function (jqXHR, textStatus, errorThrown) {
+                    console.log("Ocorreu o seguinte erro: " + errorThrown);
+                }
+            });
+        }
+
+        function addPlaces() {
+            places.sort(function (a, b) {
+                return a.Distance.value - b.Distance.value;
+            });
+
+            if ($('#listPlaces li').length > 0)
+                $('#listPlaces li').remove();
+
+            places.map(function (e, i) {
+                var listItem = "";
+                listItem = "<li><p>" + e.Nome + "</p><button class='verRota btn btn-success' data-latlng='" + e.LatLng.lat() + "|" + e.LatLng.lng() + "'>Ver rota</button><span>" + e.Distance.text + "</span ></li>";
+
+                $('#listPlaces').append(listItem);
+
+                marker = new google.maps.Marker({
+                    position: e.LatLng,
+                    map: map
+                });
+
+                google.maps.event.addListener(marker, 'click', (function (marker, i) {
+                    return function () {
+                        var info = "";
+                        info += "<label>" + e.Nome + "</label>";
+                        info += "<p>" + e.Telefone + "</p>";
+                        info += "<label>" + e.Endereco + "</label>";
+
+                        infowindow.setContent(info);
+                        infowindow.open(map, marker);
+                    }
+                })(marker, i));
+            });
+
+            $('.panelPlaces').fadeIn();
+        }
+
+        function calculateAndDisplayRoute(origem, destino, directionsService, directionsDisplay) {
+            directionsService.route({
+                origin: origem,
+                destination: destino,
+                travelMode: 'DRIVING'
+            }, function (response, status) {
+                if (status === 'OK') {
+                    directionsDisplay.setDirections(response);
+                } else {
+                    console.log('Directions request failed due to ' + status);
+                }
+            })
+        };
+    </script>
+    <script async defer
+            src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA2-URVRT-w7G3mGCwxkQWu1Y47rNeKQvU&libraries=places&callback=initMap">
+    </script>
+}
